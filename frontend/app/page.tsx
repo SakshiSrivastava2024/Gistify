@@ -15,6 +15,11 @@ export default function Home() {
   const [uploadError, setUploadError] = useState("");
   const [highlightId, setHighlightId] = useState<number | null>(null);
 
+  // summary
+  const [summary, setSummary] = useState("");
+  const [summarizing, setSummarizing] = useState(false);
+  const [summaryError, setSummaryError] = useState("");
+
   // click-to-understand
   const [termInputs, setTermInputs] = useState<{ [key: number]: string }>({});
   const [explanations, setExplanations] = useState<{ [key: number]: string }>({});
@@ -31,6 +36,21 @@ export default function Home() {
   const [prereqErrors, setPrereqErrors] = useState<{ [key: number]: string }>({});
   const [progress, setProgress] = useState<{ [term: string]: string }>({});
 
+  const loadSummary = async () => {
+    setSummary("");
+    setSummaryError("");
+    setSummarizing(true);
+    try {
+      const res = await fetch(`${API}/summarize`, { method: "POST" });
+      if (!res.ok) throw new Error("Summary failed");
+      const data = await res.json();
+      setSummary(data.summary);
+    } catch {
+      setSummaryError("Couldn't generate a summary. You can still read and ask questions.");
+    }
+    setSummarizing(false);
+  };
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -43,6 +63,8 @@ export default function Home() {
     }
 
     setUploading(true);
+    let uploaded = false;
+
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -58,6 +80,7 @@ export default function Home() {
       setPrereqs({});
       setPrereqErrors({});
       setProgress({});
+      uploaded = true;
 
       // load saved progress for this paper
       try {
@@ -71,7 +94,9 @@ export default function Home() {
     } catch {
       setUploadError("Something went wrong. Make sure the backend is running.");
     }
+
     setUploading(false);
+    if (uploaded) loadSummary(); // paper shows right away, summary arrives after
   };
 
   const handleExplain = async (id: number, context: string) => {
@@ -177,12 +202,33 @@ export default function Home() {
   return (
     <main style={{ padding: "2rem", maxWidth: "1300px", margin: "0 auto" }}>
       <h1>Gistify</h1>
-      <p>Never leave the paper to understand the paper.</p>
+      <p style={{ color: "#8b949e", marginTop: 0 }}>
+        Never leave the paper to understand the paper.
+      </p>
 
       <input type="file" accept="application/pdf" onChange={handleUpload} />
 
       {uploadError && <p style={{ color: "#f85149" }}>{uploadError}</p>}
-      {uploading && <p>Reading your paper...</p>}
+      {uploading && <p style={{ color: "#8b949e" }}>Reading your paper...</p>}
+
+      {summarizing && <p style={{ color: "#8b949e" }}>Summarizing the paper...</p>}
+      {summaryError && <p style={{ color: "#f85149" }}>{summaryError}</p>}
+      {summary && (
+        <div
+          style={{
+            marginTop: "1rem",
+            background: "#161b22",
+            border: "1px solid #30363d",
+            padding: "1rem 1.25rem",
+            borderRadius: "8px",
+            whiteSpace: "pre-line",
+            lineHeight: 1.6,
+          }}
+        >
+          <h3 style={{ marginTop: 0 }}>Summary</h3>
+          {summary}
+        </div>
+      )}
 
       {paragraphs.length > 0 && (
         <div style={{ marginTop: "2rem", display: "flex", gap: "2rem" }}>
@@ -194,13 +240,13 @@ export default function Home() {
                 id={`para-${p.id}`}
                 style={{
                   marginBottom: "1.5rem",
-                  borderBottom: "1px solid #444",
+                  borderBottom: "1px solid #30363d",
                   paddingBottom: "1rem",
                   background: highlightId === p.id ? "#3b3200" : "transparent",
                   transition: "background 0.4s",
                 }}
               >
-                <p>
+                <p style={{ lineHeight: 1.6 }}>
                   <strong>Page {p.page}:</strong> {p.text}
                 </p>
 
@@ -269,7 +315,7 @@ export default function Home() {
                           onClick={() => handleMarkStatus(c.term, "understood")}
                           style={{
                             marginRight: "0.5rem",
-                            background: progress[c.term] === "understood" ? "#238636" : undefined,
+                            background: progress[c.term] === "understood" ? "#238636" : "#30363d",
                           }}
                         >
                           {progress[c.term] === "understood" ? "✅ Understood" : "Mark Understood"}
@@ -277,7 +323,7 @@ export default function Home() {
                         <button
                           onClick={() => handleMarkStatus(c.term, "needs_revision")}
                           style={{
-                            background: progress[c.term] === "needs_revision" ? "#9e6a03" : undefined,
+                            background: progress[c.term] === "needs_revision" ? "#9e6a03" : "#30363d",
                           }}
                         >
                           {progress[c.term] === "needs_revision"
@@ -293,8 +339,8 @@ export default function Home() {
           </div>
 
           {/* Right: ask the paper */}
-          <div style={{ flex: 1, borderLeft: "1px solid #444", paddingLeft: "1.5rem" }}>
-            <h3>Ask the paper</h3>
+          <div style={{ flex: 1, borderLeft: "1px solid #30363d", paddingLeft: "1.5rem" }}>
+            <h3 style={{ marginTop: 0 }}>Ask the paper</h3>
 
             <div style={{ maxHeight: "60vh", overflowY: "auto", marginBottom: "1rem" }}>
               {chatHistory.map((c, i) => {
@@ -312,6 +358,7 @@ export default function Home() {
                         border: "1px solid #30363d",
                         padding: "0.5rem",
                         borderRadius: "6px",
+                        lineHeight: 1.5,
                       }}
                     >
                       {c.answer}
@@ -344,7 +391,7 @@ export default function Home() {
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleAsk()}
-              style={{ width: "100%", marginBottom: "0.5rem" }}
+              style={{ width: "100%", boxSizing: "border-box", marginBottom: "0.5rem" }}
             />
             <button onClick={handleAsk} disabled={asking}>
               {asking ? "Thinking..." : "Ask"}
