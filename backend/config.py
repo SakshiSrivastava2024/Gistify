@@ -3,9 +3,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEN_MODEL = "gemini-2.5-flash"
-EMBED_MODEL = "models/gemini-embedding-001"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+LLM_MODEL = "openai/gpt-oss-120b"
 
 UPLOAD_DIR = "uploads"
 FRONTEND_ORIGIN = "http://localhost:3000"

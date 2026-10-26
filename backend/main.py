@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import FRONTEND_ORIGIN
-from routers import papers
+from routers import papers, explain
 
 app = FastAPI(title="PaperPath API")
 
@@ -14,6 +14,7 @@ app.add_middleware(
 )
 
 app.include_router(papers.router)
+app.include_router(explain.router)
 
 
 @app.get("/health")
