@@ -32,7 +32,7 @@ def parse_pdf(file_path: str, min_chunk_size: int = 400):
                 para_id += 1
                 buffer = ""
 
-        if buffer.strip():
+        if len(buffer.strip()) >= 20:
             paragraphs.append({
                 "id": para_id,
                 "page": page_num,
