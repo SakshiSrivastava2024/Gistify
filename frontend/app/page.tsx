@@ -1,12 +1,20 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type Source = { id: number; page: number };
 type Chat = { question: string; answer: string; sources: Source[] };
 type Concept = { term: string; explanation: string };
 type Status = "understood" | "needs_revision";
+type Explanation = { id: number; term: string; text: string; loading: boolean };
+type Popup = { text: string; paraId: number; x: number; y: number };
 
 const API = "http://localhost:8000";
+const MAX_SELECTION = 200; // a word, phrase, or short sentence
+
+const getParaEl = (node: Node | null): HTMLElement | null => {
+  const el = node instanceof Element ? node : node?.parentElement;
+  return (el?.closest("[data-para-id]") as HTMLElement | null) ?? null;
+};
 
 export default function Home() {
   const [paragraphs, setParagraphs] = useState<any[]>([]);
@@ -20,10 +28,9 @@ export default function Home() {
   const [summarizing, setSummarizing] = useState(false);
   const [summaryError, setSummaryError] = useState("");
 
-  // click-to-understand
-  const [termInputs, setTermInputs] = useState<{ [key: number]: string }>({});
-  const [explanations, setExplanations] = useState<{ [key: number]: string }>({});
-  const [loadingId, setLoadingId] = useState<number | null>(null);
+  // highlight-to-explain
+  const [popup, setPopup] = useState<Popup | null>(null);
+  const [explanations, setExplanations] = useState<{ [paraId: number]: Explanation[] }>({});
 
   // ask the paper
   const [question, setQuestion] = useState("");
@@ -35,6 +42,16 @@ export default function Home() {
   const [prereqLoadingId, setPrereqLoadingId] = useState<number | null>(null);
   const [prereqErrors, setPrereqErrors] = useState<{ [key: number]: string }>({});
   const [progress, setProgress] = useState<{ [term: string]: string }>({});
+
+  // hide the popup when the selection is cleared (e.g. click elsewhere)
+  useEffect(() => {
+    const onChange = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) setPopup(null);
+    };
+    document.addEventListener("selectionchange", onChange);
+    return () => document.removeEventListener("selectionchange", onChange);
+  }, []);
 
   const loadSummary = async () => {
     setSummary("");
@@ -76,13 +93,13 @@ export default function Home() {
       setParagraphs(data.paragraphs);
       setPaperName(data.filename);
       setExplanations({});
+      setPopup(null);
       setChatHistory([]);
       setPrereqs({});
       setPrereqErrors({});
       setProgress({});
       uploaded = true;
 
-      // load saved progress for this paper
       try {
         const progRes = await fetch(
           `${API}/progress?paper_name=${encodeURIComponent(data.filename)}`
@@ -96,31 +113,95 @@ export default function Home() {
     }
 
     setUploading(false);
-    if (uploaded) loadSummary(); // paper shows right away, summary arrives after
+    if (uploaded) loadSummary();
   };
 
-  const handleExplain = async (id: number, context: string) => {
-    const term = termInputs[id];
-    if (!term) return;
+  // --- highlight to explain ---
 
-    setLoadingId(id);
+  const handleSelection = () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+      setPopup(null);
+      return;
+    }
+
+    const text = sel.toString().replace(/\s+/g, " ").trim();
+    if (!text || text.length > MAX_SELECTION) {
+      setPopup(null);
+      return;
+    }
+
+    // the selection must stay inside one paragraph
+    const startEl = getParaEl(sel.anchorNode);
+    const endEl = getParaEl(sel.focusNode);
+    if (!startEl || startEl !== endEl) {
+      setPopup(null);
+      return;
+    }
+
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    const x = Math.min(Math.max(rect.left + rect.width / 2, 80), window.innerWidth - 80);
+    const below = rect.bottom + 8;
+    const y = below > window.innerHeight - 48 ? rect.top - 44 : below;
+
+    setPopup({ text, paraId: Number(startEl.dataset.paraId), x, y });
+  };
+
+  const updateExplanation = (paraId: number, entryId: number, patch: Partial<Explanation>) => {
+    setExplanations((prev) => ({
+      ...prev,
+      [paraId]: (prev[paraId] || []).map((ex) =>
+        ex.id === entryId ? { ...ex, ...patch } : ex
+      ),
+    }));
+  };
+
+  const removeExplanation = (paraId: number, entryId: number) => {
+    setExplanations((prev) => ({
+      ...prev,
+      [paraId]: (prev[paraId] || []).filter((ex) => ex.id !== entryId),
+    }));
+  };
+
+  const handleGistify = async () => {
+    if (!popup) return;
+    const { text, paraId } = popup;
+    const para = paragraphs.find((p) => p.id === paraId);
+    if (!para) return;
+
+    setPopup(null);
+    window.getSelection()?.removeAllRanges();
+
+    // don't ask twice for the same term in the same paragraph
+    const already = (explanations[paraId] || []).some(
+      (ex) => ex.term.toLowerCase() === text.toLowerCase()
+    );
+    if (already) return;
+
+    const entryId = Date.now();
+    setExplanations((prev) => ({
+      ...prev,
+      [paraId]: [{ id: entryId, term: text, text: "", loading: true }, ...(prev[paraId] || [])],
+    }));
+
     try {
       const res = await fetch(`${API}/explain`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ term, context }),
+        body: JSON.stringify({ term: text, context: para.text }),
       });
       if (!res.ok) throw new Error("Explain failed");
       const data = await res.json();
-      setExplanations((prev) => ({ ...prev, [id]: data.explanation }));
+      updateExplanation(paraId, entryId, { text: data.explanation, loading: false });
     } catch {
-      setExplanations((prev) => ({
-        ...prev,
-        [id]: "Could not get an explanation. Try again.",
-      }));
+      updateExplanation(paraId, entryId, {
+        text: "Could not get an explanation. Try again.",
+        loading: false,
+      });
     }
-    setLoadingId(null);
   };
+
+  // --- ask the paper ---
 
   const handleAsk = async () => {
     if (!question.trim()) return;
@@ -149,6 +230,8 @@ export default function Home() {
     setAsking(false);
   };
 
+  // --- prerequisites + progress ---
+
   const handleGetPrereqs = async (id: number, paragraph: string) => {
     setPrereqLoadingId(id);
     setPrereqErrors((prev) => ({ ...prev, [id]: "" }));
@@ -170,10 +253,7 @@ export default function Home() {
         setPrereqs((prev) => ({ ...prev, [id]: data.concepts }));
       }
     } catch {
-      setPrereqErrors((prev) => ({
-        ...prev,
-        [id]: "Something went wrong. Try again.",
-      }));
+      setPrereqErrors((prev) => ({ ...prev, [id]: "Something went wrong. Try again." }));
     }
     setPrereqLoadingId(null);
   };
@@ -231,9 +311,19 @@ export default function Home() {
       )}
 
       {paragraphs.length > 0 && (
-        <div style={{ marginTop: "2rem", display: "flex", gap: "2rem" }}>
+        <p style={{ color: "#8b949e", fontSize: "0.85rem", marginTop: "1.5rem", marginBottom: 0 }}>
+          Tip: highlight any word or phrase in the paper, then click "Gistify this".
+        </p>
+      )}
+
+      {paragraphs.length > 0 && (
+        <div style={{ marginTop: "1rem", display: "flex", gap: "2rem" }}>
           {/* Left: paper reader */}
-          <div style={{ flex: 2, maxHeight: "80vh", overflowY: "auto", paddingRight: "1rem" }}>
+          <div
+            onMouseUp={handleSelection}
+            onScroll={() => setPopup(null)}
+            style={{ flex: 2, maxHeight: "80vh", overflowY: "auto", paddingRight: "1rem" }}
+          >
             {paragraphs.map((p) => (
               <div
                 key={p.id}
@@ -246,38 +336,42 @@ export default function Home() {
                   transition: "background 0.4s",
                 }}
               >
-                <p style={{ lineHeight: 1.6 }}>
+                <p data-para-id={p.id} style={{ lineHeight: 1.6 }}>
                   <strong>Page {p.page}:</strong> {p.text}
                 </p>
 
-                {/* click-to-understand */}
-                <input
-                  type="text"
-                  placeholder="Term you don't understand"
-                  value={termInputs[p.id] || ""}
-                  onChange={(e) =>
-                    setTermInputs((prev) => ({ ...prev, [p.id]: e.target.value }))
-                  }
-                  onKeyDown={(e) => e.key === "Enter" && handleExplain(p.id, p.text)}
-                  style={{ marginRight: "0.5rem" }}
-                />
-                <button onClick={() => handleExplain(p.id, p.text)}>
-                  {loadingId === p.id ? "Explaining..." : "Explain"}
-                </button>
-
-                {explanations[p.id] && (
+                {/* explanations from highlighted text */}
+                {(explanations[p.id] || []).map((ex) => (
                   <div
+                    key={ex.id}
                     style={{
-                      marginTop: "0.5rem",
+                      marginBottom: "0.5rem",
                       background: "#161b22",
                       border: "1px solid #30363d",
+                      borderLeft: "3px solid #388bfd",
                       padding: "0.75rem",
                       borderRadius: "6px",
                     }}
                   >
-                    {explanations[p.id]}
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem" }}>
+                      <strong>{ex.term}</strong>
+                      <button
+                        onClick={() => removeExplanation(p.id, ex.id)}
+                        style={{ background: "transparent", color: "#8b949e", padding: "0 0.4rem" }}
+                        aria-label="Dismiss explanation"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <div style={{ marginTop: "0.25rem", lineHeight: 1.5 }}>
+                      {ex.loading ? (
+                        <span style={{ color: "#8b949e" }}>Explaining...</span>
+                      ) : (
+                        ex.text
+                      )}
+                    </div>
                   </div>
-                )}
+                ))}
 
                 {/* prerequisites */}
                 <div style={{ marginTop: "0.5rem" }}>
@@ -398,6 +492,28 @@ export default function Home() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* floating "Gistify this" button, shown next to the highlighted text */}
+      {popup && (
+        <button
+          onMouseDown={(e) => e.preventDefault()} // keeps the text highlighted while clicking
+          onClick={handleGistify}
+          style={{
+            position: "fixed",
+            left: popup.x,
+            top: popup.y,
+            transform: "translateX(-50%)",
+            zIndex: 1000,
+            background: "#388bfd",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+            padding: "0.45rem 0.9rem",
+            borderRadius: "999px",
+            fontWeight: 600,
+          }}
+        >
+          Gistify this
+        </button>
       )}
     </main>
   );
