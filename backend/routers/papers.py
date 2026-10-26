@@ -4,6 +4,7 @@ from fastapi import APIRouter, UploadFile, File
 
 from config import UPLOAD_DIR
 from services.pdf_parser import parse_pdf
+from services.rag import index_paragraphs
 
 router = APIRouter(tags=["papers"])
 
@@ -17,4 +18,5 @@ async def upload_pdf(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
 
     paragraphs = parse_pdf(file_path)
+    index_paragraphs(paragraphs)
     return {"filename": file.filename, "paragraphs": paragraphs}
