@@ -3,20 +3,33 @@ import { useState } from "react";
 
 type Source = { id: number; page: number };
 type Chat = { question: string; answer: string; sources: Source[] };
+type Concept = { term: string; explanation: string };
+type Status = "understood" | "needs_revision";
+
+const API = "http://localhost:8000";
 
 export default function Home() {
   const [paragraphs, setParagraphs] = useState<any[]>([]);
+  const [paperName, setPaperName] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [highlightId, setHighlightId] = useState<number | null>(null);
 
+  // click-to-understand
   const [termInputs, setTermInputs] = useState<{ [key: number]: string }>({});
   const [explanations, setExplanations] = useState<{ [key: number]: string }>({});
   const [loadingId, setLoadingId] = useState<number | null>(null);
 
+  // ask the paper
   const [question, setQuestion] = useState("");
   const [chatHistory, setChatHistory] = useState<Chat[]>([]);
   const [asking, setAsking] = useState(false);
+
+  // prerequisites + progress
+  const [prereqs, setPrereqs] = useState<{ [key: number]: Concept[] }>({});
+  const [prereqLoadingId, setPrereqLoadingId] = useState<number | null>(null);
+  const [prereqErrors, setPrereqErrors] = useState<{ [key: number]: string }>({});
+  const [progress, setProgress] = useState<{ [term: string]: string }>({});
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -34,16 +47,27 @@ export default function Home() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await fetch("http://localhost:8000/upload", {
-        method: "POST",
-        body: formData,
-      });
+      const res = await fetch(`${API}/upload`, { method: "POST", body: formData });
       if (!res.ok) throw new Error("Upload failed");
 
       const data = await res.json();
       setParagraphs(data.paragraphs);
+      setPaperName(data.filename);
       setExplanations({});
       setChatHistory([]);
+      setPrereqs({});
+      setPrereqErrors({});
+      setProgress({});
+
+      // load saved progress for this paper
+      try {
+        const progRes = await fetch(
+          `${API}/progress?paper_name=${encodeURIComponent(data.filename)}`
+        );
+        if (progRes.ok) setProgress(await progRes.json());
+      } catch {
+        // progress is optional, ignore failures
+      }
     } catch {
       setUploadError("Something went wrong. Make sure the backend is running.");
     }
@@ -56,7 +80,7 @@ export default function Home() {
 
     setLoadingId(id);
     try {
-      const res = await fetch("http://localhost:8000/explain", {
+      const res = await fetch(`${API}/explain`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ term, context }),
@@ -80,7 +104,7 @@ export default function Home() {
     setQuestion("");
 
     try {
-      const res = await fetch("http://localhost:8000/ask", {
+      const res = await fetch(`${API}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: q }),
@@ -98,6 +122,48 @@ export default function Home() {
       ]);
     }
     setAsking(false);
+  };
+
+  const handleGetPrereqs = async (id: number, paragraph: string) => {
+    setPrereqLoadingId(id);
+    setPrereqErrors((prev) => ({ ...prev, [id]: "" }));
+    try {
+      const res = await fetch(`${API}/prerequisites`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paragraph }),
+      });
+      if (!res.ok) throw new Error("Prerequisites failed");
+      const data = await res.json();
+
+      if (data.concepts.length === 0) {
+        setPrereqErrors((prev) => ({
+          ...prev,
+          [id]: "Couldn't find prerequisites for this paragraph. Try again.",
+        }));
+      } else {
+        setPrereqs((prev) => ({ ...prev, [id]: data.concepts }));
+      }
+    } catch {
+      setPrereqErrors((prev) => ({
+        ...prev,
+        [id]: "Something went wrong. Try again.",
+      }));
+    }
+    setPrereqLoadingId(null);
+  };
+
+  const handleMarkStatus = async (term: string, status: Status) => {
+    try {
+      const res = await fetch(`${API}/progress`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paper_name: paperName, term, status }),
+      });
+      if (res.ok) setProgress((prev) => ({ ...prev, [term]: status }));
+    } catch {
+      // keep the old status if saving fails
+    }
   };
 
   const jumpTo = (id: number) => {
@@ -138,6 +204,7 @@ export default function Home() {
                   <strong>Page {p.page}:</strong> {p.text}
                 </p>
 
+                {/* click-to-understand */}
                 <input
                   type="text"
                   placeholder="Term you don't understand"
@@ -163,6 +230,62 @@ export default function Home() {
                     }}
                   >
                     {explanations[p.id]}
+                  </div>
+                )}
+
+                {/* prerequisites */}
+                <div style={{ marginTop: "0.5rem" }}>
+                  <button
+                    onClick={() => handleGetPrereqs(p.id, p.text)}
+                    disabled={prereqLoadingId === p.id}
+                  >
+                    {prereqLoadingId === p.id
+                      ? "Finding prerequisites..."
+                      : "What should I know first?"}
+                  </button>
+                </div>
+
+                {prereqErrors[p.id] && (
+                  <p style={{ color: "#f85149", marginTop: "0.5rem" }}>{prereqErrors[p.id]}</p>
+                )}
+
+                {prereqs[p.id] && (
+                  <div style={{ marginTop: "0.5rem" }}>
+                    {prereqs[p.id].map((c, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          background: "#161b22",
+                          border: "1px solid #30363d",
+                          padding: "0.75rem",
+                          borderRadius: "6px",
+                          marginBottom: "0.5rem",
+                        }}
+                      >
+                        <strong>{c.term}</strong>
+                        <p style={{ margin: "0.25rem 0 0.5rem" }}>{c.explanation}</p>
+
+                        <button
+                          onClick={() => handleMarkStatus(c.term, "understood")}
+                          style={{
+                            marginRight: "0.5rem",
+                            background: progress[c.term] === "understood" ? "#238636" : undefined,
+                          }}
+                        >
+                          {progress[c.term] === "understood" ? "✅ Understood" : "Mark Understood"}
+                        </button>
+                        <button
+                          onClick={() => handleMarkStatus(c.term, "needs_revision")}
+                          style={{
+                            background: progress[c.term] === "needs_revision" ? "#9e6a03" : undefined,
+                          }}
+                        >
+                          {progress[c.term] === "needs_revision"
+                            ? "🔁 Needs Revision"
+                            : "Mark Needs Revision"}
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -199,7 +322,11 @@ export default function Home() {
                           <button
                             key={s.id}
                             onClick={() => jumpTo(s.id)}
-                            style={{ marginRight: "0.4rem", fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}
+                            style={{
+                              marginRight: "0.4rem",
+                              fontSize: "0.75rem",
+                              padding: "0.2rem 0.5rem",
+                            }}
                           >
                             p. {s.page}
                           </button>

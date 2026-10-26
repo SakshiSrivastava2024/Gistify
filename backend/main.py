@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import FRONTEND_ORIGIN
 from db.database import init_db
-from routers import papers, explain, chat, prerequisites, progress
+from routers import papers, explain, chat, prerequisites, progress, summary
 
 app = FastAPI(title="Gistify API")
 init_db()
@@ -20,6 +20,7 @@ app.include_router(explain.router)
 app.include_router(chat.router)
 app.include_router(prerequisites.router)
 app.include_router(progress.router)
+app.include_router(summary.router)
 
 
 @app.get("/health")

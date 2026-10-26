@@ -66,3 +66,12 @@ Question: {question}
 
     sources = [{"id": i, "page": page} for i, (_, page) in ordered]
     return answer, sources
+
+
+def get_all_paragraphs() -> list[dict]:
+    data = collection.get()
+    items = [
+        {"id": int(i), "page": m["page"], "text": d}
+        for i, d, m in zip(data["ids"], data["documents"], data["metadatas"])
+    ]
+    return sorted(items, key=lambda p: p["id"])  # reading order
