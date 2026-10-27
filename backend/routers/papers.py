@@ -17,6 +17,14 @@ async def upload_pdf(file: UploadFile = File(...)):
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    paragraphs = parse_pdf(file_path)
-    index_paragraphs(paragraphs)
-    return {"filename": file.filename, "paragraphs": paragraphs}
+    parsed = parse_pdf(file_path, fallback_title=file.filename)
+
+    # only text goes into the search index; figures are shown in the reader
+    text_items = [p for p in parsed["paragraphs"] if p["kind"] == "text"]
+    index_paragraphs(text_items)
+
+    return {
+        "filename": file.filename,
+        "title": parsed["title"],
+        "paragraphs": parsed["paragraphs"],
+    }
