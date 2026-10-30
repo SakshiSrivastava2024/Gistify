@@ -4,7 +4,7 @@
 
 Gistify is an AI reading companion for hard technical papers. Upload a PDF, highlight any word or phrase you don't understand, and get a plain-English explanation drawn from the paragraph you're reading. Ask questions about the paper and get answers with page citations that jump you straight to the source.
 
-> **Demo video:** _add your link here_
+> **Demo video:** (docs\video\gistify-demo.mp4)
 
 ## The problem
 
