@@ -39,7 +39,7 @@ flowchart LR
   P --> M[PyMuPDF parser]
   M --> C[ChromaDB index]
   U -->|highlight, ask, prerequisites, summary| P
-  P --> L[Groq Llama 3.3 70B]
+  P --> L[Groq openai/gpt-oss-120b]
   P --> S[SQLite progress]
 ```
 
@@ -57,7 +57,7 @@ flowchart LR
 | Backend | Python, FastAPI |
 | PDF parsing | PyMuPDF |
 | Retrieval | ChromaDB with local embeddings |
-| LLM | Llama 3.3 70B on Groq |
+| LLM | openai/gpt-oss-120b on Groq |
 | Storage | SQLite (learning progress) |
 
 ## Project structure
